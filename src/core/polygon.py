@@ -1,6 +1,7 @@
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Tuple
+import cv2
 
 @dataclass
 class Point:
@@ -9,11 +10,13 @@ class Point:
     is_selected: bool = False
 
 class Polygon:
-    def __init__(self, name: str, class_type: str = "hold"):
+    def __init__(self, name: str, class_type: str):
         self.name = name
-        self.class_type = class_type  # "hold" ou "volume"
-        self.points: List[Point] = []
+        self.class_type = class_type
+        self.points = []
         self.selected_point_index = -1
+        self.is_selected = False  # Pour la sélection du polygone entier
+        self.drag_start = None  # Point de départ du déplacement
     
     def add_point(self, x: float, y: float):
         """Ajoute un point au polygone."""
@@ -24,6 +27,12 @@ class Polygon:
         if 0 <= index < len(self.points):
             self.points[index].x = x
             self.points[index].y = y
+    
+    def move_all_points(self, dx: float, dy: float):
+        """Déplace tous les points du polygone."""
+        for point in self.points:
+            point.x += dx
+            point.y += dy
     
     def select_point(self, index: int):
         """Sélectionne un point du polygone."""
@@ -38,32 +47,31 @@ class Polygon:
             self.selected_point_index = -1
     
     def get_points_array(self) -> np.ndarray:
-        """Retourne les points sous forme de tableau numpy."""
+        """Retourne les points du polygone sous forme de tableau numpy."""
         return np.array([[p.x, p.y] for p in self.points])
     
-    def is_point_inside(self, x: float, y: float, tolerance: float = 5.0) -> int:
-        """Vérifie si un point est à l'intérieur du polygone ou près d'un point."""
-        # Vérifier d'abord si le point est près d'un point du polygone
-        for i, point in enumerate(self.points):
-            if abs(point.x - x) < tolerance and abs(point.y - y) < tolerance:
-                return i
-        
-        # Si non, vérifier si le point est à l'intérieur du polygone
+    def is_point_inside(self, x: float, y: float) -> int:
+        """Vérifie si un point est à l'intérieur du polygone."""
         if len(self.points) < 3:
             return -1
             
         points = self.get_points_array()
-        x_coords = points[:, 0]
-        y_coords = points[:, 1]
+        point = np.array([x, y])
         
-        inside = False
-        j = len(points) - 1
+        # Calculer la distance minimale à un point du polygone
+        min_dist = float('inf')
+        min_index = -1
+        for i, p in enumerate(points):
+            dist = np.linalg.norm(p - point)
+            if dist < min_dist:
+                min_dist = dist
+                min_index = i
         
-        for i in range(len(points)):
-            if ((y_coords[i] > y) != (y_coords[j] > y) and
-                (x < (x_coords[j] - x_coords[i]) * (y - y_coords[i]) /
-                (y_coords[j] - y_coords[i]) + x_coords[i])):
-                inside = not inside
-            j = i
+        # Si le point est proche d'un point du polygone, retourner son index
+        if min_dist < 10:  # Distance de 10 pixels
+            return min_index
             
-        return -1 if not inside else -2 
+        # Sinon, vérifier si le point est à l'intérieur du polygone
+        if cv2.pointPolygonTest(points.astype(np.float32), (x, y), False) >= 0:
+            return len(points)  # Index spécial pour indiquer que le point est à l'intérieur
+        return -1 

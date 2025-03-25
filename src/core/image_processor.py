@@ -53,7 +53,7 @@ class ImageProcessor:
         height, width = image.shape[:2]
         bytes_per_line = 3 * width
         q_image = QImage(
-            image.data, width, height,
+            image.data.tobytes(), width, height,
             bytes_per_line, QImage.Format.Format_RGB888
         ).rgbSwapped()
         pixmap = QPixmap.fromImage(q_image)
