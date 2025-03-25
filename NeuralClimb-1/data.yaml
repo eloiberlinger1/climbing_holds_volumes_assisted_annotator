@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 3
+names: ['-', 'Hold', 'dbd']
+
+roboflow:
+  workspace: chiang-mai-university-i0wly
+  project: neuralclimb
+  version: 1
+  license: MIT
+  url: https://universe.roboflow.com/chiang-mai-university-i0wly/neuralclimb/dataset/1
