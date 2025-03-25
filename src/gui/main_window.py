@@ -12,7 +12,7 @@ from PyQt6.QtGui import (
 import os
 from ..core.image_processor import ImageProcessor
 from ..core.annotation_manager import AnnotationManager
-from ..core.polygon import Polygon
+from ..core.polygon import Polygon, Point
 from .image_viewer import ImageViewer
 import cv2
 import numpy as np
@@ -149,11 +149,19 @@ class MainWindow(QMainWindow):
         self.new_polygon_button.clicked.connect(self.start_new_polygon)
         self.delete_polygon_button.clicked.connect(self.enable_polygon_deletion)
         
+        print("Configuration des raccourcis clavier...")
         # Ajout des raccourcis clavier
         QShortcut(QKeySequence("p"), self).activated.connect(self.show_previous_image)
+        print("Raccourci 'p' configuré")
         QShortcut(QKeySequence("n"), self).activated.connect(self.show_next_image)
+        print("Raccourci 'n' configuré")
         QShortcut(QKeySequence("d"), self).activated.connect(self.enable_polygon_deletion)
+        print("Raccourci 'd' configuré")
         QShortcut(QKeySequence(":"), self).activated.connect(self.start_new_polygon)
+        print("Raccourci ':' configuré")
+        QShortcut(QKeySequence("="), self).activated.connect(self.add_midpoints_to_polygon)
+        print("Raccourci '=' configuré")
+        print("Configuration des raccourcis clavier terminée")
     
     def start_new_polygon(self):
         """Démarre la création d'un nouveau polygone."""
@@ -273,7 +281,6 @@ class MainWindow(QMainWindow):
             self.update_image_display()
         elif self.selected_polygon:
             self.selected_polygon.end_drag()
-            self.selected_polygon = None
             self.update_image_display()
     
     def deselect_all(self):
@@ -474,6 +481,8 @@ class MainWindow(QMainWindow):
     
     def select_polygon(self, polygon):
         """Sélectionne un polygone."""
+        print(f"Sélection du polygone {polygon.name}")
+        
         # Désélectionner tous les autres polygones
         for p in self.current_annotations:
             p.is_selected = False
@@ -483,8 +492,12 @@ class MainWindow(QMainWindow):
         
         # Sélectionner le polygone
         polygon.is_selected = True
+        self.selected_polygon = polygon
         self.current_polygon = polygon
         self.delete_polygon_button.setEnabled(True)
+        
+        print(f"Polygone sélectionné : {polygon.name}")
+        print(f"Nombre de points : {len(polygon.points)}")
         self.update_image_display()
     
     def select_point(self, polygon, point_index):
@@ -499,4 +512,43 @@ class MainWindow(QMainWindow):
         polygon.select_point(point_index)
         self.current_polygon = polygon
         self.delete_polygon_button.setEnabled(True)
+        self.update_image_display()
+    
+    def add_midpoints_to_polygon(self):
+        """Ajoute des points au milieu de chaque ligne du polygone sélectionné."""
+        print("Appel de la méthode add_midpoints_to_polygon")
+        if self.selected_polygon is None:
+            print("Aucun polygone sélectionné")
+            return
+        
+        print(f"Tentative d'ajout de points au milieu des lignes du polygone {self.selected_polygon.name}")
+        print(f"Nombre de points actuels : {len(self.selected_polygon.points)}")
+        
+        # Créer une liste pour stocker les nouveaux points avec leurs indices d'insertion
+        new_points = []
+        
+        # Pour chaque paire de points consécutifs
+        n_points = len(self.selected_polygon.points)
+        for i in range(n_points):
+            current_point = self.selected_polygon.points[i]
+            next_point = self.selected_polygon.points[(i + 1) % n_points]
+            
+            # Calculer le point milieu
+            mid_x = (current_point.x + next_point.x) / 2
+            mid_y = (current_point.y + next_point.y) / 2
+            
+            print(f"Point milieu {i} calculé entre ({current_point.x}, {current_point.y}) et ({next_point.x}, {next_point.y}) : ({mid_x}, {mid_y})")
+            new_points.append((i + 1, Point(mid_x, mid_y)))
+        
+        print(f"Nombre de points milieux calculés : {len(new_points)}")
+        
+        # Insérer les nouveaux points après chaque point existant
+        # On parcourt la liste en sens inverse pour ne pas perturber les indices
+        for insert_index, point in reversed(new_points):
+            print(f"Insertion du point milieu à l'index {insert_index}")
+            self.selected_polygon.points.insert(insert_index, point)
+        
+        print(f"Nombre de points après ajout : {len(self.selected_polygon.points)}")
+        
+        # Mettre à jour l'affichage
         self.update_image_display() 
