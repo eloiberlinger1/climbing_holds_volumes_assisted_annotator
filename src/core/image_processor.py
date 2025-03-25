@@ -20,6 +20,11 @@ class ImageProcessor:
         self.label_annotator = sv.LabelAnnotator()
         self.bounding_box_annotator = sv.BoxAnnotator()
         self.ai_assist_enabled = False
+        self.confidence_threshold = 0.8  # Seuil de confiance par défaut à 80%
+    
+    def set_confidence_threshold(self, threshold: float):
+        """Définit le seuil de confiance pour filtrer les prédictions."""
+        self.confidence_threshold = threshold
     
     def enable_ai_assist(self):
         """Active l'assistance IA et initialise le modèle Roboflow."""
@@ -72,23 +77,25 @@ class ImageProcessor:
             labels = []
             
             for prediction in results['predictions']:
-                x = prediction['x']
-                y = prediction['y']
-                width = prediction['width']
-                height = prediction['height']
                 confidence = prediction['confidence']
-                class_name = prediction['class']
-                
-                # Convertir les coordonnées YOLO en format xyxy
-                x1 = x - width/2
-                y1 = y - height/2
-                x2 = x + width/2
-                y2 = y + height/2
-                
-                boxes.append([x1, y1, x2, y2])
-                confidences.append(confidence)
-                class_ids.append(0)  # On utilise 0 car nous n'avons qu'une seule classe
-                labels.append(class_name)
+                # Ne garder que les prédictions au-dessus du seuil de confiance
+                if confidence >= self.confidence_threshold:
+                    x = prediction['x']
+                    y = prediction['y']
+                    width = prediction['width']
+                    height = prediction['height']
+                    class_name = prediction['class']
+                    
+                    # Convertir les coordonnées YOLO en format xyxy
+                    x1 = x - width/2
+                    y1 = y - height/2
+                    x2 = x + width/2
+                    y2 = y + height/2
+                    
+                    boxes.append([x1, y1, x2, y2])
+                    confidences.append(confidence)
+                    class_ids.append(0)  # On utilise 0 car nous n'avons qu'une seule classe
+                    labels.append(f"{class_name} ({confidence:.1%})")
             
             if boxes:
                 detections = sv.Detections(
