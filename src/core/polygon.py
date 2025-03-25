@@ -8,6 +8,10 @@ class Point:
     x: float
     y: float
     is_selected: bool = False
+    
+    def is_near(self, x: float, y: float, threshold: float = 10) -> bool:
+        """Vérifie si un point est proche des coordonnées données."""
+        return abs(self.x - x) <= threshold and abs(self.y - y) <= threshold
 
 class Polygon:
     def __init__(self, name: str, class_type: str):
@@ -50,28 +54,36 @@ class Polygon:
         """Retourne les points du polygone sous forme de tableau numpy."""
         return np.array([[p.x, p.y] for p in self.points])
     
-    def is_point_inside(self, x: float, y: float) -> int:
+    def is_point_inside(self, x: float, y: float) -> bool:
         """Vérifie si un point est à l'intérieur du polygone."""
         if len(self.points) < 3:
-            return -1
+            return False
             
         points = self.get_points_array()
         point = np.array([x, y])
         
-        # Calculer la distance minimale à un point du polygone
-        min_dist = float('inf')
-        min_index = -1
-        for i, p in enumerate(points):
-            dist = np.linalg.norm(p - point)
-            if dist < min_dist:
-                min_dist = dist
-                min_index = i
+        # Vérifier si le point est proche d'un des points du polygone
+        for p in points:
+            if np.linalg.norm(p - point) < 10:  # Distance de 10 pixels
+                return True
         
-        # Si le point est proche d'un point du polygone, retourner son index
-        if min_dist < 10:  # Distance de 10 pixels
-            return min_index
-            
-        # Sinon, vérifier si le point est à l'intérieur du polygone
-        if cv2.pointPolygonTest(points.astype(np.float32), (x, y), False) >= 0:
-            return len(points)  # Index spécial pour indiquer que le point est à l'intérieur
-        return -1 
+        # Utiliser cv2.pointPolygonTest pour une détection précise
+        contour = points.reshape((-1, 1, 2)).astype(np.float32)
+        distance = cv2.pointPolygonTest(contour, (x, y), False)
+        return distance >= 0
+    
+    def start_drag(self, x: float, y: float):
+        """Commence le déplacement du polygone."""
+        self.drag_start = (x, y)
+    
+    def update_drag(self, x: float, y: float):
+        """Met à jour la position pendant le déplacement."""
+        if self.drag_start is not None:
+            dx = x - self.drag_start[0]
+            dy = y - self.drag_start[1]
+            self.move_all_points(dx, dy)
+            self.drag_start = (x, y)
+    
+    def end_drag(self):
+        """Termine le déplacement du polygone."""
+        self.drag_start = None 
