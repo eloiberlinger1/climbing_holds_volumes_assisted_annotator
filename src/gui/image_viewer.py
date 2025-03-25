@@ -15,8 +15,8 @@ class ImageViewer(QGraphicsView):
         
         # Configuration de la vue
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -69,49 +69,43 @@ class ImageViewer(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if not self.initial_zoom_done and self._scene is not None:
-            self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
-            viewport_rect = self.viewport().rect()
             scene_rect = self._scene.sceneRect()
-            scale_x = viewport_rect.width() / scene_rect.width()
-            scale_y = viewport_rect.height() / scene_rect.height()
-            self.zoom_factor = min(scale_x, scale_y)
-            self.setTransform(QTransform().scale(self.zoom_factor, self.zoom_factor))
-            self.initial_zoom_done = True
-            print(f"[DEBUG] Zoom initial après redimensionnement : {self.zoom_factor}")
+            if scene_rect.width() > 0 and scene_rect.height() > 0:
+                self.fitInView(scene_rect, Qt.AspectRatioMode.KeepAspectRatio)
+                viewport_rect = self.viewport().rect()
+                scale_x = viewport_rect.width() / scene_rect.width()
+                scale_y = viewport_rect.height() / scene_rect.height()
+                self.zoom_factor = min(scale_x, scale_y)
+                self.setTransform(QTransform().scale(self.zoom_factor, self.zoom_factor))
+                self.initial_zoom_done = True
 
     def mousePressEvent(self, event):
+        """Gère les événements de clic de souris."""
         if event.button() == Qt.MouseButton.MiddleButton:
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self.is_panning = True
             self.last_mouse_pos = event.pos()
-            event.accept()
-        elif event.button() == Qt.MouseButton.LeftButton:
-            self.is_dragging = True
-            pos = self.mapToScene(event.pos())
-            main_window = self.window()
-            if hasattr(main_window, 'handle_mouse_click'):
-                main_window.handle_mouse_click(pos)
-            event.accept()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
         else:
-            event.ignore()
+            # Transmettre l'événement à la fenêtre principale
+            main_window = self.window()
+            if main_window:
+                main_window.handle_mouse_click(event.pos())
 
     def mouseReleaseEvent(self, event):
+        """Gère les événements de relâchement du bouton de la souris."""
         if event.button() == Qt.MouseButton.MiddleButton:
-            self.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.is_panning = False
-            event.accept()
-        elif event.button() == Qt.MouseButton.LeftButton and self.is_dragging:
-            self.is_dragging = False
-            pos = self.mapToScene(event.pos())
-            main_window = self.window()
-            if hasattr(main_window, 'handle_mouse_release'):
-                main_window.handle_mouse_release(pos)
-            event.accept()
+            self.last_mouse_pos = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         else:
-            event.ignore()
+            # Transmettre l'événement à la fenêtre principale
+            main_window = self.window()
+            if main_window:
+                main_window.handle_mouse_release(event.pos())
 
     def mouseMoveEvent(self, event):
-        if self.is_panning and self.last_mouse_pos is not None:
+        """Gère les événements de déplacement de la souris."""
+        if self.is_panning and self.last_mouse_pos:
             delta = event.pos() - self.last_mouse_pos
             self.horizontalScrollBar().setValue(
                 self.horizontalScrollBar().value() - delta.x()
@@ -120,30 +114,23 @@ class ImageViewer(QGraphicsView):
                 self.verticalScrollBar().value() - delta.y()
             )
             self.last_mouse_pos = event.pos()
-            event.accept()
-        elif self.is_dragging:
-            pos = self.mapToScene(event.pos())
-            main_window = self.window()
-            if hasattr(main_window, 'handle_mouse_move'):
-                main_window.handle_mouse_move(pos)
-            event.accept()
         else:
-            event.ignore()
+            # Transmettre l'événement à la fenêtre principale
+            main_window = self.window()
+            if main_window:
+                main_window.handle_mouse_move(event.pos())
 
     def wheelEvent(self, event):
+        """Gère les événements de la molette de la souris."""
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # Zoom avec Ctrl + molette
             factor = 1.1 if event.angleDelta().y() > 0 else 0.9
+            new_zoom = self.zoom_factor * factor
             
             # Limiter le zoom entre 0.1 et 10
-            new_zoom = max(0.1, min(10.0, self.zoom_factor * factor))
-            
-            # Ne mettre à jour que si le zoom a changé
-            if new_zoom != self.zoom_factor:
+            if 0.1 <= new_zoom <= 10.0:
                 self.zoom_factor = new_zoom
                 self.setTransform(QTransform().scale(self.zoom_factor, self.zoom_factor))
-            
-            event.accept()
         else:
             # Défilement normal
             super().wheelEvent(event)

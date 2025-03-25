@@ -127,7 +127,11 @@ class MainWindow(QMainWindow):
         self.current_annotations = []
         self.current_polygon = None
         self.selected_point = None
+        self.selected_polygon = None
         self.is_dragging = False
+        self.current_zoom = 1.0
+        self.image_item = None
+        self.scene = QGraphicsScene()
         
         # Connecter les signaux
         self.setup_connections()
@@ -146,9 +150,10 @@ class MainWindow(QMainWindow):
         self.delete_polygon_button.clicked.connect(self.enable_polygon_deletion)
         
         # Ajout des raccourcis clavier
-        QShortcut(QKeySequence("p"), self).activated.connect(self.start_new_polygon)
+        QShortcut(QKeySequence("p"), self).activated.connect(self.show_previous_image)
+        QShortcut(QKeySequence("n"), self).activated.connect(self.show_next_image)
         QShortcut(QKeySequence("d"), self).activated.connect(self.enable_polygon_deletion)
-        QShortcut(QKeySequence("="), self).activated.connect(self.add_point_to_polygon)
+        QShortcut(QKeySequence(":"), self).activated.connect(self.start_new_polygon)
     
     def start_new_polygon(self):
         """Démarre la création d'un nouveau polygone."""
@@ -215,11 +220,12 @@ class MainWindow(QMainWindow):
         self.update_image_display()
     
     def handle_mouse_click(self, pos):
-        if not self.current_image:
+        if self.original_image is None:
             return
         
-        scene_pos = self.image_viewer.mapToScene(pos)
-        view_pos = self.image_viewer.mapFromScene(scene_pos)
+        # Convertir QPointF en QPoint
+        point = QPoint(int(pos.x()), int(pos.y()))
+        scene_pos = self.image_viewer.mapToScene(point)
         
         # Vérifier si on clique sur un point d'un polygone
         for polygon in self.current_annotations:
@@ -227,25 +233,28 @@ class MainWindow(QMainWindow):
                 if abs(point.x - scene_pos.x()) < 10 and abs(point.y - scene_pos.y()) < 10:
                     self.selected_point = (polygon, i)
                     self.selected_polygon = polygon
-                    self.update_image_display()
+                    polygon.start_drag(scene_pos.x(), scene_pos.y())
+                    self.select_polygon(polygon)
                     return
                 
         # Vérifier si on clique sur un polygone
         for polygon in self.current_annotations:
             if polygon.is_point_inside(scene_pos.x(), scene_pos.y()):
                 self.selected_polygon = polygon
-                self.update_image_display()
+                polygon.start_drag(scene_pos.x(), scene_pos.y())
+                self.select_polygon(polygon)
                 return
             
         # Si on ne clique sur rien, désélectionner tout
         self.deselect_all()
     
     def handle_mouse_move(self, pos):
-        if not self.current_image:
+        if self.original_image is None:
             return
         
-        scene_pos = self.image_viewer.mapToScene(pos)
-        view_pos = self.image_viewer.mapFromScene(scene_pos)
+        # Convertir QPointF en QPoint
+        point = QPoint(int(pos.x()), int(pos.y()))
+        scene_pos = self.image_viewer.mapToScene(point)
         
         if self.selected_point:
             polygon, point_index = self.selected_point
@@ -256,104 +265,97 @@ class MainWindow(QMainWindow):
             self.update_image_display()
     
     def handle_mouse_release(self, pos):
-        if self.selected_polygon:
+        """Gère le relâchement du bouton de la souris."""
+        if self.selected_point:
+            polygon, _ = self.selected_point
+            polygon.end_drag()
+            self.selected_point = None
+            self.update_image_display()
+        elif self.selected_polygon:
             self.selected_polygon.end_drag()
+            self.selected_polygon = None
             self.update_image_display()
     
     def deselect_all(self):
         """Désélectionne tous les éléments."""
-        if self.current_polygon:
-            self.current_polygon.deselect_point()
-            self.current_polygon.is_selected = False
-            self.current_polygon.drag_start = None
+        # Désélectionner tous les polygones et points
+        for polygon in self.current_annotations:
+            polygon.is_selected = False
+            polygon.selected_point_index = -1
+            polygon.drag_start = None
+            for point in polygon.points:
+                point.is_selected = False
+        
+        # Réinitialiser les variables d'état
         self.current_polygon = None
+        self.selected_polygon = None
+        self.selected_point = None
+        self.delete_polygon_button.setEnabled(False)
+        self.update_image_display()
     
     def update_image_display(self):
         """Met à jour l'affichage de l'image avec les annotations."""
         if self.original_image is None:
             return
+
+        # Log des valeurs des pixels de l'image originale
+        print("\n=== Valeurs des pixels de l'image originale ===")
+        print(f"Type de l'image: {self.original_image.dtype}")
+        print(f"Valeurs min/max: {np.min(self.original_image)}/{np.max(self.original_image)}")
+        print(f"Valeurs moyennes RGB: {np.mean(self.original_image, axis=(0,1))}")
         
-        print("[DEBUG] Début de update_image_display")
-        current_zoom = self.image_viewer.zoom_factor
-        print(f"[DEBUG] Zoom actuel : {current_zoom}")
+        # Créer une copie profonde de l'image originale
+        display_image = self.original_image.copy()
         
-        # Créer une copie de l'image originale
-        self.display_image = self.original_image.copy()
-        
-        # Dessiner les polygones
+        # Log des valeurs après la copie
+        print("\n=== Valeurs des pixels après copie ===")
+        print(f"Type de l'image: {display_image.dtype}")
+        print(f"Valeurs min/max: {np.min(display_image)}/{np.max(display_image)}")
+        print(f"Valeurs moyennes RGB: {np.mean(display_image, axis=(0,1))}")
+
+        # Dessiner tous les polygones
         for polygon in self.current_annotations:
-            points = polygon.get_points_array()
-            if len(points) >= 3:
-                # Créer un masque pour le remplissage semi-transparent
-                mask = np.zeros_like(self.display_image)
-                color = (0, 255, 0) if polygon.class_type == "hold" else (255, 0, 0)
-                
-                # Ajuster l'opacité en fonction de la sélection
-                opacity = 0.4 if polygon.is_selected else 0.2
-                
-                cv2.fillPoly(mask, [points.astype(np.int32)], color)
-                
-                # Appliquer le masque avec transparence
-                self.display_image = cv2.addWeighted(
-                    self.display_image, 1,
-                    mask, opacity,
-                    0
-                )
-                
-                # Dessiner le contour du polygone
-                contour_color = (0, 255, 255) if polygon.is_selected else color
-                contour_thickness = 2 if polygon.is_selected else 1
-                cv2.polylines(
-                    self.display_image,
-                    [points.astype(np.int32)],
-                    True,
-                    contour_color,
-                    contour_thickness
-                )
-                
-                # Dessiner les points
-                for i, point in enumerate(polygon.points):
-                    # Ajuster la taille et la couleur des points en fonction de la sélection
-                    point_color = (0, 0, 255) if point.is_selected else (255, 255, 0)
-                    point_size = 8 if point.is_selected else 6
-                    border_size = 10 if point.is_selected else 8
-                    
-                    # Dessiner un cercle plus grand pour la bordure
-                    cv2.circle(
-                        self.display_image,
-                        (int(point.x), int(point.y)),
-                        border_size,
-                        (0, 0, 0),
-                        1
-                    )
-                    # Dessiner le point
-                    cv2.circle(
-                        self.display_image,
-                        (int(point.x), int(point.y)),
-                        point_size,
-                        point_color,
-                        -1
-                    )
-        
-        # Convertir l'image en RGB pour Qt
-        self.display_image = cv2.cvtColor(self.display_image, cv2.COLOR_BGR2RGB)
-        
-        # Créer une nouvelle scène avec l'image mise à jour
-        height, width = self.display_image.shape[:2]
+            polygon.draw(display_image)
+            
+        # Log des valeurs après le dessin des polygones
+        print("\n=== Valeurs des pixels après dessin des polygones ===")
+        print(f"Type de l'image: {display_image.dtype}")
+        print(f"Valeurs min/max: {np.min(display_image)}/{np.max(display_image)}")
+        print(f"Valeurs moyennes RGB: {np.mean(display_image, axis=(0,1))}")
+
+        # Convertir l'image en QImage pour l'affichage
+        height, width, channel = display_image.shape
         bytes_per_line = 3 * width
-        q_image = QImage(self.display_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-        pixmap = QPixmap.fromImage(q_image)
         
-        # Mettre à jour la scène existante
-        self.image_viewer._scene.clear()
-        self.image_viewer._scene.addPixmap(pixmap)
-        self.image_viewer._scene.setSceneRect(0, 0, width, height)
+        # S'assurer que l'image est au format RGB
+        if channel == 4:  # Si l'image a un canal alpha
+            display_image = cv2.cvtColor(display_image, cv2.COLOR_BGRA2RGB)
+        elif channel == 3:  # Si l'image est en BGR
+            display_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
+            
+        # Créer le QImage
+        q_image = QImage(display_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
         
-        # Restaurer le zoom
-        print(f"[DEBUG] Restauration du zoom : {current_zoom}")
-        self.image_viewer.zoom_factor = current_zoom
-        self.image_viewer.setTransform(QTransform().scale(current_zoom, current_zoom))
-        print(f"[DEBUG] Zoom restauré : {self.image_viewer.zoom_factor}")
+        # Log des valeurs après conversion en QImage
+        print("\n=== Valeurs des pixels après conversion en QImage ===")
+        print(f"Format de l'image: {q_image.format()}")
+        print(f"Profondeur de bits: {q_image.depth()}")
+        print(f"Nombre de canaux: {q_image.depth() // 8}")
+
+        # Mettre à jour l'image dans le QGraphicsScene
+        if self.image_item is None:
+            self.image_item = QGraphicsPixmapItem(QPixmap.fromImage(q_image))
+            self.scene.addItem(self.image_item)
+        else:
+            self.image_item.setPixmap(QPixmap.fromImage(q_image))
+
+        # Mettre à jour la scène
+        self.scene.setSceneRect(self.image_item.boundingRect())
+        self.image_viewer.setScene(self.scene)
+        
+        # Restaurer le zoom précédent
+        if self.current_zoom != 1.0:
+            self.image_viewer.setTransform(QTransform().scale(self.current_zoom, self.current_zoom))
     
     def update_confidence_threshold(self, value):
         """Met à jour le seuil de confiance et l'affiche."""
@@ -421,13 +423,25 @@ class MainWindow(QMainWindow):
     def show_next_image(self):
         """Affiche l'image suivante."""
         if self.current_image_index < len(self.image_files) - 1:
+            # Sauvegarder les annotations actuelles si nécessaire
+            if self.current_annotations:
+                self.save_annotations()
             self.current_image_index += 1
+            self.current_annotations = []  # Réinitialiser les annotations
+            self.current_polygon = None
+            self.selected_point = None
             self.show_current_image()
     
     def show_previous_image(self):
         """Affiche l'image précédente."""
         if self.current_image_index > 0:
+            # Sauvegarder les annotations actuelles si nécessaire
+            if self.current_annotations:
+                self.save_annotations()
             self.current_image_index -= 1
+            self.current_annotations = []  # Réinitialiser les annotations
+            self.current_polygon = None
+            self.selected_point = None
             self.show_current_image()
     
     def save_annotations(self):
@@ -485,16 +499,4 @@ class MainWindow(QMainWindow):
         polygon.select_point(point_index)
         self.current_polygon = polygon
         self.delete_polygon_button.setEnabled(True)
-        self.update_image_display()
-    
-    def deselect_all(self):
-        """Désélectionne tous les polygones et points."""
-        for polygon in self.current_annotations:
-            polygon.is_selected = False
-            polygon.selected_point_index = -1
-            for point in polygon.points:
-                point.is_selected = False
-        
-        self.current_polygon = None
-        self.delete_polygon_button.setEnabled(False)
         self.update_image_display() 
