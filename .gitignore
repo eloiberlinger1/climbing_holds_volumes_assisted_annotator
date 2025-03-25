@@ -16,5 +16,6 @@ ENV/
 # Project specific
 config.py
 annotations/
-dataset/
 *.pt
+data/to_annotate/*.jpg
+data/to_annotate/*.png
