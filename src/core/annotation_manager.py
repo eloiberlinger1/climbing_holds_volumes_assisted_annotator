@@ -42,9 +42,13 @@ class AnnotationManager:
                 # Normaliser les coordonnées des points
                 normalized_points = self.normalize_coordinates(annotation.points, width, height)
                 
-                # Écrire chaque point dans le fichier
+                # Créer la ligne d'annotation
+                line = f"{class_id}"
                 for x, y in normalized_points:
-                    f.write(f"{class_id} {x:.6f} {y:.6f}\n")
+                    line += f" {x:.6f} {y:.6f}"
+                
+                # Écrire la ligne dans le fichier
+                f.write(line + "\n")
         
         print(f"Annotations sauvegardées dans {annotation_file}")
     
@@ -65,34 +69,26 @@ class AnnotationManager:
         height, width = image.shape[:2]
         
         annotations = []
-        current_polygon = []
-        current_class = None
         
         with open(annotation_file, 'r') as f:
             for line in f:
-                class_id, x, y = map(float, line.strip().split())
-                class_id = int(class_id)
+                # Séparer la classe et les coordonnées
+                values = line.strip().split()
+                class_id = int(values[0])
+                class_type = "hold" if class_id == 0 else "volume"
                 
-                # Si on change de classe ou si c'est le premier point
-                if current_class is None:
-                    current_class = "hold" if class_id == 0 else "volume"
-                    current_polygon = []
-                elif (class_id == 0 and current_class != "hold") or (class_id == 1 and current_class != "volume"):
-                    # Si on change de classe, sauvegarder le polygone actuel et en commencer un nouveau
-                    if current_polygon:
-                        annotations.append((current_class, current_polygon))
-                    current_class = "hold" if class_id == 0 else "volume"
-                    current_polygon = []
+                # Extraire les coordonnées
+                points = []
+                for i in range(1, len(values), 2):
+                    x = float(values[i])
+                    y = float(values[i + 1])
+                    # Dénormaliser les coordonnées
+                    x = x * width
+                    y = y * height
+                    points.append((x, y))
                 
-                # Dénormaliser les coordonnées
-                x = x * width
-                y = y * height
-                
-                current_polygon.append((x, y))
-        
-        # Ajouter le dernier polygone s'il existe
-        if current_polygon:
-            annotations.append((current_class, current_polygon))
+                if points:
+                    annotations.append((class_type, points))
         
         print(f"Annotations chargées pour {image_path}: {len(annotations)} polygones")
         return annotations 

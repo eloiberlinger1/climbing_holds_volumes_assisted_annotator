@@ -45,17 +45,21 @@ class MainWindow(QMainWindow):
         self.finish_button = QPushButton("Terminer")
         
         # Définir une largeur minimale pour les boutons
-        button_width = 120
+        button_width = 150
         self.prev_button.setMinimumWidth(button_width)
         self.next_button.setMinimumWidth(button_width)
         self.save_button.setMinimumWidth(button_width)
         self.finish_button.setMinimumWidth(button_width)
         
-        # Ajout des boutons au layout de navigation
+        # Ajout des boutons au layout de navigation avec des espacements
         navigation_layout.addWidget(self.prev_button)
+        navigation_layout.addSpacing(10)
         navigation_layout.addWidget(self.next_button)
+        navigation_layout.addSpacing(10)
         navigation_layout.addWidget(self.save_button)
+        navigation_layout.addSpacing(10)
         navigation_layout.addWidget(self.finish_button)
+        navigation_layout.addStretch()
         navigation_group.setLayout(navigation_layout)
         
         # Groupe pour les contrôles d'assistance IA
