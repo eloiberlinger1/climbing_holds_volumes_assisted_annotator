@@ -20,7 +20,7 @@ class ImageProcessor:
         self.label_annotator = sv.LabelAnnotator()
         self.bounding_box_annotator = sv.BoxAnnotator()
         self.ai_assist_enabled = False
-        self.confidence_threshold = 0.8  # Seuil de confiance par défaut à 80%
+        self.confidence_threshold = 0.4  # Seuil de confiance par défaut à 40%
     
     def set_confidence_threshold(self, threshold: float):
         """Définit le seuil de confiance pour filtrer les prédictions."""
@@ -86,31 +86,16 @@ class ImageProcessor:
         
         try:
             print("Exécution de la prédiction via l'API Roboflow...")
-            try:
-                # Essayer d'abord avec le format mask
-                print("Tentative avec le format mask...")
-                result = self.model.predict(image_path, confidence=40, overlap=30, format="json")
-                print(f"Résultat brut : {result}")
-                if result is not None:
-                    if isinstance(result, dict):
-                        results = result
-                    else:
-                        results = result.json()
-                else:
-                    raise Exception("La prédiction a retourné None")
+            result = self.model.predict(image_path, confidence=40, overlap=30)
+            print(f"Résultat brut : {result}")
+            
+            if result is None:
+                raise Exception("La prédiction a retourné None")
                 
-            except Exception as e:
-                print(f"Erreur avec le format mask : {str(e)}")
-                print("Tentative avec le format par défaut...")
-                result = self.model.predict(image_path, confidence=40, overlap=30)
-                print(f"Résultat brut : {result}")
-                if result is not None:
-                    if isinstance(result, dict):
-                        results = result
-                    else:
-                        results = result.json()
-                else:
-                    raise Exception("La prédiction a retourné None")
+            if isinstance(result, dict):
+                results = result
+            else:
+                results = result.json()
                 
             print(f"Résultats de la prédiction : {results}")
             
@@ -119,27 +104,29 @@ class ImageProcessor:
             confidences = []
             class_ids = []
             labels = []
-            segmentations = []
+            
+            # Obtenir les dimensions de l'image
+            image = cv2.imread(image_path)
+            image_height, image_width = image.shape[:2]
+            print(f"Dimensions de l'image : {image_width}x{image_height}")
             
             for prediction in results['predictions']:
                 confidence = prediction['confidence']
                 if confidence >= self.confidence_threshold:
-                    # Extraire les points de segmentation
-                    if 'segmentation' in prediction:
-                        points = prediction['segmentation']
-                        segmentations.append(points)
-                    else:
-                        segmentations.append(None)
-                    
                     # Calculer la boîte englobante
-                    x = prediction['x']
-                    y = prediction['y']
-                    width = prediction['width']
-                    height = prediction['height']
-                    x1 = x - width/2
-                    y1 = y - height/2
-                    x2 = x + width/2
-                    y2 = y + height/2
+                    x = float(prediction['x'])
+                    y = float(prediction['y'])
+                    width = float(prediction['width'])
+                    height = float(prediction['height'])
+                    
+                    # Calculer les coordonnées des coins
+                    x1 = max(0, x - width/2)
+                    y1 = max(0, y - height/2)
+                    x2 = min(image_width, x + width/2)
+                    y2 = min(image_height, y + height/2)
+                    
+                    print(f"Boîte englobante : x={x}, y={y}, w={width}, h={height}")
+                    print(f"Coins : ({x1}, {y1}), ({x2}, {y2})")
                     
                     boxes.append([x1, y1, x2, y2])
                     confidences.append(confidence)
@@ -147,17 +134,25 @@ class ImageProcessor:
                     labels.append(f"Hold ({confidence*100:.1f}%)")
             
             if not boxes:
+                print("Aucune détection ne dépasse le seuil de confiance")
                 return None, None
                 
-            # Créer l'objet Detections avec les segmentations
+            # Créer l'objet Detections
+            boxes = np.array(boxes, dtype=np.float32)
+            confidences = np.array(confidences, dtype=np.float32)
+            class_ids = np.array(class_ids, dtype=np.int32)
+            
+            print(f"Boxes shape: {boxes.shape}")
+            print(f"Confidences shape: {confidences.shape}")
+            print(f"Class IDs shape: {class_ids.shape}")
+            
             detections = sv.Detections(
-                xyxy=np.array(boxes),
-                confidence=np.array(confidences),
-                class_id=np.array(class_ids),
-                data={'segmentations': segmentations}
+                xyxy=boxes,
+                confidence=confidences,
+                class_id=class_ids
             )
             
-            print(f"Nombre de détections trouvées : {len(detections.xyxy)}")
+            print(f"Nombre de détections trouvées : {len(detections)}")
             return detections, labels
             
         except Exception as e:

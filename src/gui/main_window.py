@@ -619,7 +619,6 @@ class MainWindow(QMainWindow):
                 
                 if detections is not None and labels is not None:
                     print(f"Détection réussie : {len(detections.xyxy)} objets trouvés")
-                    print(f"Contenu des détections : {detections}")
                     
                     # Supprimer les polygones existants créés par l'IA
                     print("Suppression des polygones IA existants...")
@@ -636,24 +635,16 @@ class MainWindow(QMainWindow):
                         print(f"Boîte englobante : {box}")
                         print(f"Confiance : {confidence}")
                         
-                        # Par défaut, toutes les détections sont des prises
+                        # Créer un polygone à partir de la boîte englobante
                         polygon = Polygon(f"ia_hold_{i+1}", "hold")
                         print(f"Polygone créé : {polygon.name}")
                         
-                        # Extraire les points de segmentation si disponibles
-                        if 'segmentations' in detections.data and detections.data['segmentations'][i] is not None:
-                            points = detections.data['segmentations'][i]
-                            for point in points:
-                                polygon.add_point(point['x'], point['y'])
-                            print(f"Utilisation des points de segmentation : {len(points)} points")
-                        else:
-                            # Si pas de segmentation, utiliser la boîte englobante
-                            x1, y1, x2, y2 = box
-                            polygon.add_point(x1, y1)  # Haut gauche
-                            polygon.add_point(x2, y1)  # Haut droite
-                            polygon.add_point(x2, y2)  # Bas droite
-                            polygon.add_point(x1, y2)  # Bas gauche
-                            print("Utilisation de la boîte englobante : 4 points")
+                        # Ajouter les 4 coins de la boîte englobante
+                        x1, y1, x2, y2 = box
+                        polygon.add_point(x1, y1)  # Haut gauche
+                        polygon.add_point(x2, y1)  # Haut droite
+                        polygon.add_point(x2, y2)  # Bas droite
+                        polygon.add_point(x1, y2)  # Bas gauche
                         
                         self.current_annotations.append(polygon)
                         print(f"Polygone IA ajouté aux annotations : {polygon.name} avec {len(polygon.points)} points")
