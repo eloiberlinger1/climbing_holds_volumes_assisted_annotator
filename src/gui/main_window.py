@@ -42,11 +42,13 @@ class MainWindow(QMainWindow):
         self.prev_button = QPushButton("Précédente (p)")
         self.next_button = QPushButton("Suivante (n)")
         self.save_button = QPushButton("Sauvegarder (s)")
+        self.finish_button = QPushButton("Terminer l'annotation")
         
         # Ajout des boutons au layout de navigation
         navigation_layout.addWidget(self.prev_button)
         navigation_layout.addWidget(self.next_button)
         navigation_layout.addWidget(self.save_button)
+        navigation_layout.addWidget(self.finish_button)
         navigation_group.setLayout(navigation_layout)
         
         # Groupe pour les contrôles d'assistance IA
@@ -77,6 +79,13 @@ class MainWindow(QMainWindow):
         # Groupe pour les contrôles d'annotation
         annotation_group = QGroupBox("Annotation")
         annotation_layout = QVBoxLayout()
+        
+        # Ajouter un label pour la prévisualisation
+        self.preview_label = QLabel()
+        self.preview_label.setMinimumSize(200, 200)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setStyleSheet("border: 1px solid gray;")
+        annotation_layout.addWidget(self.preview_label)
         
         # Sélection du type de polygone
         self.polygon_class = QComboBox()
@@ -132,18 +141,24 @@ class MainWindow(QMainWindow):
         self.current_zoom = 1.0
         self.image_item = None
         self.scene = QGraphicsScene()
+        self.labels = ["hold", "volume"]  # Ajout des labels disponibles
         
         # Connecter les signaux
         self.setup_connections()
         
         # Charger les images
         self.load_images()
+        
+        # Créer les dossiers nécessaires
+        os.makedirs("data/annotations/images", exist_ok=True)
+        os.makedirs("data/annotations/labels", exist_ok=True)
     
     def setup_connections(self):
         # Connexion des signaux
         self.prev_button.clicked.connect(self.show_previous_image)
         self.next_button.clicked.connect(self.show_next_image)
         self.save_button.clicked.connect(self.save_annotations)
+        self.finish_button.clicked.connect(self.finish_annotation)
         self.ai_assist_button.clicked.connect(self.toggle_ai_assist)
         self.confidence_slider.valueChanged.connect(self.update_confidence_threshold)
         self.new_polygon_button.clicked.connect(self.start_new_polygon)
@@ -305,30 +320,29 @@ class MainWindow(QMainWindow):
         if self.original_image is None:
             return
 
-        # Log des valeurs des pixels de l'image originale
-        print("\n=== Valeurs des pixels de l'image originale ===")
-        print(f"Type de l'image: {self.original_image.dtype}")
-        print(f"Valeurs min/max: {np.min(self.original_image)}/{np.max(self.original_image)}")
-        print(f"Valeurs moyennes RGB: {np.mean(self.original_image, axis=(0,1))}")
-        
         # Créer une copie profonde de l'image originale
         display_image = self.original_image.copy()
         
-        # Log des valeurs après la copie
-        print("\n=== Valeurs des pixels après copie ===")
-        print(f"Type de l'image: {display_image.dtype}")
-        print(f"Valeurs min/max: {np.min(display_image)}/{np.max(display_image)}")
-        print(f"Valeurs moyennes RGB: {np.mean(display_image, axis=(0,1))}")
+        # Calculer l'épaisseur des lignes en fonction du zoom
+        line_thickness = max(1, int(2 * self.current_zoom))
+        point_radius = max(3, int(5 * self.current_zoom))
 
         # Dessiner tous les polygones
         for polygon in self.current_annotations:
-            polygon.draw(display_image)
+            # Ajuster l'opacité en fonction de la sélection
+            opacity = 0.1 if polygon.is_selected else 0.05
+            polygon.draw(display_image, line_thickness=line_thickness, point_radius=point_radius, opacity=opacity)
             
-        # Log des valeurs après le dessin des polygones
-        print("\n=== Valeurs des pixels après dessin des polygones ===")
-        print(f"Type de l'image: {display_image.dtype}")
-        print(f"Valeurs min/max: {np.min(display_image)}/{np.max(display_image)}")
-        print(f"Valeurs moyennes RGB: {np.mean(display_image, axis=(0,1))}")
+            # Si c'est le polygone sélectionné, créer la prévisualisation
+            if polygon.is_selected:
+                preview_image = self.create_preview_image(polygon)
+                if preview_image is not None:
+                    preview_pixmap = QPixmap.fromImage(preview_image)
+                    self.preview_label.setPixmap(preview_pixmap.scaled(
+                        self.preview_label.size(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    ))
 
         # Convertir l'image en QImage pour l'affichage
         height, width, channel = display_image.shape
@@ -342,12 +356,6 @@ class MainWindow(QMainWindow):
             
         # Créer le QImage
         q_image = QImage(display_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-        
-        # Log des valeurs après conversion en QImage
-        print("\n=== Valeurs des pixels après conversion en QImage ===")
-        print(f"Format de l'image: {q_image.format()}")
-        print(f"Profondeur de bits: {q_image.depth()}")
-        print(f"Nombre de canaux: {q_image.depth() // 8}")
 
         # Mettre à jour l'image dans le QGraphicsScene
         if self.image_item is None:
@@ -363,6 +371,38 @@ class MainWindow(QMainWindow):
         # Restaurer le zoom précédent
         if self.current_zoom != 1.0:
             self.image_viewer.setTransform(QTransform().scale(self.current_zoom, self.current_zoom))
+
+    def create_preview_image(self, polygon):
+        """Crée une prévisualisation de l'image à l'intérieur du polygone sélectionné."""
+        if self.original_image is None:
+            return None
+
+        # Créer une copie de l'image originale
+        preview = self.original_image.copy()
+        
+        # Créer un masque pour le polygone
+        mask = np.zeros(preview.shape[:2], dtype=np.uint8)
+        points = np.array([[int(p.x), int(p.y)] for p in polygon.points], dtype=np.int32)
+        cv2.fillPoly(mask, [points], 255)
+        
+        # Appliquer le masque à l'image
+        preview = cv2.bitwise_and(preview, preview, mask=mask)
+        
+        # Trouver les limites du polygone
+        x, y, w, h = cv2.boundingRect(points)
+        
+        # Recadrer l'image sur le polygone
+        preview = preview[y:y+h, x:x+w]
+        
+        # Convertir en QImage
+        height, width, channel = preview.shape
+        bytes_per_line = 3 * width
+        if channel == 4:
+            preview = cv2.cvtColor(preview, cv2.COLOR_BGRA2RGB)
+        elif channel == 3:
+            preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
+            
+        return QImage(preview.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
     
     def update_confidence_threshold(self, value):
         """Met à jour le seuil de confiance et l'affiche."""
@@ -452,11 +492,12 @@ class MainWindow(QMainWindow):
             self.show_current_image()
     
     def save_annotations(self):
-        """Sauvegarde les annotations courantes."""
+        """Sauvegarde les annotations actuelles."""
         if self.current_image_path:
             self.annotation_manager.save_annotations(
                 self.current_image_path,
-                self.current_annotations
+                self.current_annotations,
+                self.labels
             )
             QMessageBox.information(
                 self, "Succès",
@@ -551,4 +592,39 @@ class MainWindow(QMainWindow):
         print(f"Nombre de points après ajout : {len(self.selected_polygon.points)}")
         
         # Mettre à jour l'affichage
-        self.update_image_display() 
+        self.update_image_display()
+    
+    def finish_annotation(self):
+        """Termine l'annotation de l'image courante en la déplaçant vers le dossier des images annotées."""
+        if not self.current_image_path:
+            return
+            
+        # Sauvegarder les annotations actuelles
+        self.save_annotations()
+        
+        # Déplacer l'image
+        image_name = os.path.basename(self.current_image_path)
+        new_image_path = os.path.join("data/annotations/images", image_name)
+        
+        try:
+            os.rename(self.current_image_path, new_image_path)
+            print(f"Image déplacée avec succès : {new_image_path}")
+            
+            # Mettre à jour la liste des images
+            self.image_files.remove(self.current_image_path)
+            
+            # Passer à l'image suivante
+            if self.image_files:
+                self.current_image_index = 0
+                self.show_current_image()
+            else:
+                QMessageBox.information(
+                    self, "Terminé",
+                    "Toutes les images ont été annotées !"
+                )
+                self.close()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erreur",
+                f"Erreur lors du déplacement de l'image : {str(e)}"
+            ) 

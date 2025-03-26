@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene
 from PyQt6.QtCore import Qt, QPointF
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QTransform
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QTransform, QWheelEvent
 import cv2
 
 class ImageViewer(QGraphicsView):
@@ -120,59 +120,28 @@ class ImageViewer(QGraphicsView):
             if main_window:
                 main_window.handle_mouse_move(event.pos())
 
-    def wheelEvent(self, event):
-        """Gère les événements de la molette de la souris."""
+    def wheelEvent(self, event: QWheelEvent):
+        """Gère le zoom avec Ctrl + molette et le défilement normal avec la molette."""
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # Zoom avec Ctrl + molette
-            factor = 1.1 if event.angleDelta().y() > 0 else 0.9
-            new_zoom = self.zoom_factor * factor
+            zoom_factor = 1.15
+            delta = event.angleDelta().y()
             
+            if delta > 0:
+                self.zoom_factor *= zoom_factor
+            else:
+                self.zoom_factor /= zoom_factor
+                
             # Limiter le zoom entre 0.1 et 10
-            if 0.1 <= new_zoom <= 10.0:
-                self.zoom_factor = new_zoom
-                self.setTransform(QTransform().scale(self.zoom_factor, self.zoom_factor))
+            self.zoom_factor = max(0.1, min(10.0, self.zoom_factor))
+            
+            # Appliquer le zoom
+            self.setTransform(QTransform().scale(self.zoom_factor, self.zoom_factor))
+            
+            # Mettre à jour l'affichage via la fenêtre principale
+            main_window = self.window()
+            if main_window:
+                main_window.update_image_display()
         else:
             # Défilement normal
-            super().wheelEvent(event)
-
-    def update_image_display(self):
-        if not self.image:
-            return
-        
-        # Créer une copie de l'image pour le dessin
-        display_image = self.image.copy()
-        
-        # Dessiner les polygones
-        for polygon in self.polygons:
-            if polygon.is_selected:
-                color = (0, 255, 0)  # Vert pour les polygones sélectionnés
-            else:
-                color = (255, 0, 0)  # Rouge pour les polygones non sélectionnés
-            
-            # Dessiner les points
-            for i, point in enumerate(polygon.points):
-                cv2.circle(display_image, (int(point.x), int(point.y)), 5, color, -1)
-                if i > 0:
-                    cv2.line(display_image, 
-                            (int(polygon.points[i-1].x), int(polygon.points[i-1].y)),
-                            (int(point.x), int(point.y)),
-                            color, 2)
-                        
-            # Dessiner la ligne de fermeture
-            if len(polygon.points) > 0:
-                cv2.line(display_image,
-                        (int(polygon.points[-1].x), int(polygon.points[-1].y)),
-                        (int(polygon.points[0].x), int(polygon.points[0].y)),
-                        color, 2)
-                    
-        # Convertir l'image en QImage
-        height, width = display_image.shape[:2]
-        bytes_per_line = 3 * width
-        q_image = QImage(display_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        
-        # Mettre à jour la scène
-        self._scene.clear()
-        self._scene.addPixmap(QPixmap.fromImage(q_image))
-        
-        # Ajuster la vue
-        self.fitInView(self._scene.sceneRect(), Qt.KeepAspectRatio) 
+            super().wheelEvent(event) 

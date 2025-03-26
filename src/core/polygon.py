@@ -88,70 +88,30 @@ class Polygon:
         """Termine le déplacement du polygone."""
         self.drag_start = None
 
-    def draw(self, image):
+    def draw(self, image, line_thickness=2, point_radius=5, opacity=1.0):
         """Dessine le polygone sur l'image."""
         if len(self.points) < 3:
             return
-
-        points = self.get_points_array()
+            
+        # Convertir les points en format numpy pour OpenCV
+        points = np.array([[int(p.x), int(p.y)] for p in self.points], dtype=np.int32)
         
         # Créer une copie de l'image pour le dessin
-        result = image.copy()
+        overlay = image.copy()
         
-        # Créer un masque binaire pour le polygone
-        binary_mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
-        cv2.fillPoly(binary_mask, [points.astype(np.int32)], 255)
-        
-        # Créer une image RGBA pour le remplissage
+        # Dessiner le polygone
         color = (0, 255, 0) if self.class_type == "hold" else (255, 0, 0)
-        alpha = 102 if self.is_selected else 51  # 0.4 * 255 = 102, 0.2 * 255 = 51
+        cv2.fillPoly(overlay, [points], color)
         
-        # Créer un masque RGBA
-        overlay = np.zeros((image.shape[0], image.shape[1], 4), dtype=np.uint8)
-        overlay[binary_mask > 0] = (*color, alpha)
+        # Appliquer l'opacité
+        cv2.addWeighted(overlay, opacity, image, 1 - opacity, 0, image)
         
-        # Fusionner l'overlay avec l'image
-        alpha_channel = overlay[:, :, 3] / 255.0
-        alpha_3d = np.stack([alpha_channel] * 3, axis=-1)
-        
-        # Appliquer la transparence
-        result = result * (1 - alpha_3d) + overlay[:, :, :3] * alpha_3d
-        result = result.astype(np.uint8)
-        
-        # Dessiner le contour du polygone
-        contour_color = (0, 255, 255) if self.is_selected else color
-        contour_thickness = 2 if self.is_selected else 1
-        cv2.polylines(
-            result,
-            [points.astype(np.int32)],
-            True,
-            contour_color,
-            contour_thickness
-        )
+        # Dessiner les contours
+        cv2.polylines(image, [points], True, color, line_thickness)
         
         # Dessiner les points
         for i, point in enumerate(self.points):
-            # Ajuster la taille et la couleur des points en fonction de la sélection
-            point_color = (0, 0, 255) if point.is_selected else (255, 255, 0)
-            point_size = 8 if point.is_selected else 6
-            border_size = 10 if point.is_selected else 8
-            
-            # Dessiner un cercle plus grand pour la bordure
-            cv2.circle(
-                result,
-                (int(point.x), int(point.y)),
-                border_size,
-                (0, 0, 0),
-                1
-            )
-            # Dessiner le point
-            cv2.circle(
-                result,
-                (int(point.x), int(point.y)),
-                point_size,
-                point_color,
-                -1
-            )
-            
-        # Copier le résultat dans l'image d'entrée
-        image[:] = result[:] 
+            point_color = (0, 0, 255) if i == self.selected_point_index else (255, 255, 255)
+            cv2.circle(image, (int(point.x), int(point.y)), point_radius, point_color, -1)
+            if point.is_selected:
+                cv2.circle(image, (int(point.x), int(point.y)), point_radius + 2, (0, 255, 255), 2) 
