@@ -351,11 +351,11 @@ class MainWindow(QMainWindow):
             # Ajuster l'opacité et la couleur en fonction du type de polygone
             if polygon.name.startswith("ia_"):
                 # Polygone créé par l'IA : plus transparent et en vert
-                opacity = 0.03 if polygon.is_selected else 0.02
+                opacity = 0.15 if polygon.is_selected else 0.1
                 color = (0, 255, 0)  # Vert pour les polygones IA
             else:
                 # Polygone créé manuellement : normal et en bleu/rouge
-                opacity = 0.1 if polygon.is_selected else 0.05
+                opacity = 0.3 if polygon.is_selected else 0.2
                 color = None  # Utiliser la couleur par défaut
             
             polygon.draw(display_image, line_thickness=line_thickness, point_radius=point_radius, opacity=opacity, color=color)
@@ -639,12 +639,23 @@ class MainWindow(QMainWindow):
                         polygon = Polygon(f"ia_hold_{i+1}", "hold")
                         print(f"Polygone créé : {polygon.name}")
                         
-                        # Ajouter les 4 coins de la boîte englobante
+                        # Extraire les coordonnées de la boîte englobante
                         x1, y1, x2, y2 = box
-                        polygon.add_point(x1, y1)  # Haut gauche
-                        polygon.add_point(x2, y1)  # Haut droite
-                        polygon.add_point(x2, y2)  # Bas droite
-                        polygon.add_point(x1, y2)  # Bas gauche
+                        center_x = (x1 + x2) / 2
+                        center_y = (y1 + y2) / 2
+                        width = x2 - x1
+                        height = y2 - y1
+                        
+                        # Ajouter 8 points pour créer un octogone
+                        # Points sur les côtés
+                        polygon.add_point(x1, center_y - height/4)  # Gauche haut
+                        polygon.add_point(center_x - width/4, y1)   # Haut gauche
+                        polygon.add_point(center_x + width/4, y1)   # Haut droite
+                        polygon.add_point(x2, center_y - height/4)  # Droite haut
+                        polygon.add_point(x2, center_y + height/4)  # Droite bas
+                        polygon.add_point(center_x + width/4, y2)   # Bas droite
+                        polygon.add_point(center_x - width/4, y2)   # Bas gauche
+                        polygon.add_point(x1, center_y + height/4)  # Gauche bas
                         
                         self.current_annotations.append(polygon)
                         print(f"Polygone IA ajouté aux annotations : {polygon.name} avec {len(polygon.points)} points")
