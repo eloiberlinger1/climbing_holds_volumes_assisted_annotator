@@ -88,30 +88,46 @@ class Polygon:
         """Termine le déplacement du polygone."""
         self.drag_start = None
 
-    def draw(self, image, line_thickness=2, point_radius=5, opacity=1.0):
+    def draw(self, image, line_thickness=2, point_radius=5, opacity=0.1, color=None):
         """Dessine le polygone sur l'image."""
-        if len(self.points) < 3:
+        if not self.points:
             return
-            
-        # Convertir les points en format numpy pour OpenCV
-        points = np.array([[int(p.x), int(p.y)] for p in self.points], dtype=np.int32)
         
-        # Créer une copie de l'image pour le dessin
+        # Créer une copie de l'image pour le masque
         overlay = image.copy()
         
-        # Dessiner le polygone
-        color = (0, 255, 0) if self.class_type == "hold" else (255, 0, 0)
-        cv2.fillPoly(overlay, [points], color)
+        # Convertir les points en format numpy
+        points = np.array([[int(p.x), int(p.y)] for p in self.points], dtype=np.int32)
         
-        # Appliquer l'opacité
+        # Choisir la couleur en fonction du type et de la sélection
+        if color is not None:
+            fill_color = color
+            line_color = color
+        else:
+            # Couleurs par défaut
+            if self.class_type == "hold":
+                fill_color = (255, 0, 0)  # Rouge pour les prises
+                line_color = (255, 0, 0)
+            else:
+                fill_color = (0, 0, 255)  # Bleu pour les volumes
+                line_color = (0, 0, 255)
+        
+        # Dessiner le polygone rempli
+        cv2.fillPoly(overlay, [points], fill_color)
+        
+        # Fusionner avec l'image originale avec l'opacité spécifiée
         cv2.addWeighted(overlay, opacity, image, 1 - opacity, 0, image)
         
-        # Dessiner les contours
-        cv2.polylines(image, [points], True, color, line_thickness)
+        # Dessiner les lignes du polygone
+        for i in range(len(self.points)):
+            p1 = self.points[i]
+            p2 = self.points[(i + 1) % len(self.points)]
+            cv2.line(image,
+                    (int(p1.x), int(p1.y)),
+                    (int(p2.x), int(p2.y)),
+                    line_color, line_thickness)
         
         # Dessiner les points
         for i, point in enumerate(self.points):
-            point_color = (0, 0, 255) if i == self.selected_point_index else (255, 255, 255)
-            cv2.circle(image, (int(point.x), int(point.y)), point_radius, point_color, -1)
-            if point.is_selected:
-                cv2.circle(image, (int(point.x), int(point.y)), point_radius + 2, (0, 255, 255), 2) 
+            point_color = (0, 255, 255) if i == self.selected_point_index else line_color
+            cv2.circle(image, (int(point.x), int(point.y)), point_radius, point_color, -1) 

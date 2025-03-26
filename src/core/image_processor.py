@@ -67,8 +67,9 @@ class ImageProcessor:
             return None, None
         
         try:
-            # Exécuter la prédiction via l'API Roboflow
+            print("Exécution de la prédiction via l'API Roboflow...")
             results = self.model.predict(image_path, confidence=40, overlap=30).json()
+            print(f"Résultats de la prédiction : {results}")
             
             # Convertir les résultats en format supervision
             boxes = []
@@ -78,15 +79,14 @@ class ImageProcessor:
             
             for prediction in results['predictions']:
                 confidence = prediction['confidence']
-                # Ne garder que les prédictions au-dessus du seuil de confiance
                 if confidence >= self.confidence_threshold:
+                    # Extraire les coordonnées du centre et les dimensions
                     x = prediction['x']
                     y = prediction['y']
                     width = prediction['width']
                     height = prediction['height']
-                    class_name = prediction['class']
                     
-                    # Convertir les coordonnées YOLO en format xyxy
+                    # Convertir en coordonnées de boîte englobante
                     x1 = x - width/2
                     y1 = y - height/2
                     x2 = x + width/2
@@ -94,18 +94,20 @@ class ImageProcessor:
                     
                     boxes.append([x1, y1, x2, y2])
                     confidences.append(confidence)
-                    class_ids.append(0)  # On utilise 0 car nous n'avons qu'une seule classe
-                    labels.append(f"{class_name} ({confidence:.1%})")
+                    class_ids.append(0)  # 0 pour "hold"
+                    labels.append(f"Hold ({confidence*100:.1f}%)")
             
-            if boxes:
-                detections = sv.Detections(
-                    xyxy=np.array(boxes),
-                    confidence=np.array(confidences),
-                    class_id=np.array(class_ids)
-                )
-            else:
-                detections = None
+            if not boxes:
+                return None, None
+                
+            # Créer l'objet Detections
+            detections = sv.Detections(
+                xyxy=np.array(boxes),
+                confidence=np.array(confidences),
+                class_id=np.array(class_ids)
+            )
             
+            print(f"Nombre de détections trouvées : {len(detections.xyxy)}")
             return detections, labels
             
         except Exception as e:

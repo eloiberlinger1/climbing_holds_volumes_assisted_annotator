@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         
         # Groupe pour les contrôles de navigation
         navigation_group = QGroupBox("Navigation")
-        navigation_layout = QHBoxLayout()
+        navigation_layout = QVBoxLayout()
         
         # Boutons de navigation
         self.prev_button = QPushButton("Précédente (p)")
@@ -45,13 +45,13 @@ class MainWindow(QMainWindow):
         self.finish_button = QPushButton("Terminer")
         
         # Définir une largeur minimale pour les boutons
-        button_width = 150
+        button_width = 200
         self.prev_button.setMinimumWidth(button_width)
         self.next_button.setMinimumWidth(button_width)
         self.save_button.setMinimumWidth(button_width)
         self.finish_button.setMinimumWidth(button_width)
         
-        # Ajout des boutons au layout de navigation avec des espacements
+        # Ajout des boutons au layout de navigation
         navigation_layout.addWidget(self.prev_button)
         navigation_layout.addSpacing(10)
         navigation_layout.addWidget(self.next_button)
@@ -175,6 +175,9 @@ class MainWindow(QMainWindow):
         self.new_polygon_button.clicked.connect(self.start_new_polygon)
         self.delete_polygon_button.clicked.connect(self.enable_polygon_deletion)
         
+        # Ajouter la connexion pour le changement de type d'annotation
+        self.polygon_class.currentTextChanged.connect(self.update_selected_polygon_type)
+        
         print("Configuration des raccourcis clavier...")
         # Ajout des raccourcis clavier
         QShortcut(QKeySequence("p"), self).activated.connect(self.show_previous_image)
@@ -205,7 +208,7 @@ class MainWindow(QMainWindow):
         height, width = self.original_image.shape[:2]
         center_x = width / 2
         center_y = height / 2
-        size = min(width, height) / 4  # Taille du carré (1/4 de la plus petite dimension)
+        size = min(width, height) / 8  # Taille du carré (1/4 de la plus petite dimension)
         
         # Ajouter les points du carré
         self.current_polygon.add_point(center_x - size, center_y - size)  # Haut gauche
@@ -340,9 +343,17 @@ class MainWindow(QMainWindow):
 
         # Dessiner tous les polygones
         for polygon in self.current_annotations:
-            # Ajuster l'opacité en fonction de la sélection
-            opacity = 0.1 if polygon.is_selected else 0.05
-            polygon.draw(display_image, line_thickness=line_thickness, point_radius=point_radius, opacity=opacity)
+            # Ajuster l'opacité et la couleur en fonction du type de polygone
+            if polygon.name.startswith("ia_"):
+                # Polygone créé par l'IA : plus transparent et en vert
+                opacity = 0.03 if polygon.is_selected else 0.02
+                color = (0, 255, 0)  # Vert pour les polygones IA
+            else:
+                # Polygone créé manuellement : normal et en bleu/rouge
+                opacity = 0.1 if polygon.is_selected else 0.05
+                color = None  # Utiliser la couleur par défaut
+            
+            polygon.draw(display_image, line_thickness=line_thickness, point_radius=point_radius, opacity=opacity, color=color)
             
             # Si c'est le polygone sélectionné, créer la prévisualisation
             if polygon.is_selected:
@@ -428,8 +439,52 @@ class MainWindow(QMainWindow):
         threshold = value / 100.0
         self.image_processor.set_confidence_threshold(threshold)
         self.confidence_value_label.setText(f"{value}%")
+        
         if self.current_image_path and self.ai_assist_button.isChecked():
-            self.show_current_image()
+            # Supprimer les polygones dont la confiance est inférieure au seuil
+            detections, labels = self.image_processor.run_detection(self.current_image_path)
+            if detections is not None and labels is not None:
+                # Filtrer les annotations existantes
+                self.current_annotations = [
+                    polygon for polygon in self.current_annotations
+                    if not polygon.name.startswith("ia_")
+                ]
+                
+                # Créer des polygones à partir des détections
+                for i, (box, confidence) in enumerate(zip(detections.xyxy, detections.confidence)):
+                    if confidence >= threshold:
+                        # Par défaut, toutes les détections sont des prises
+                        polygon = Polygon(f"ia_hold_{i+1}", "hold")
+                        # Convertir la boîte englobante en points de polygone
+                        x1, y1, x2, y2 = box
+                        # Créer un rectangle avec les 4 coins
+                        polygon.add_point(x1, y1)  # Haut gauche
+                        polygon.add_point(x2, y1)  # Haut droite
+                        polygon.add_point(x2, y2)  # Bas droite
+                        polygon.add_point(x1, y2)  # Bas gauche
+                        self.current_annotations.append(polygon)
+                
+                self.update_image_display()
+    
+    def _polygons_overlap(self, polygon, detection):
+        """Vérifie si un polygone et une détection se chevauchent."""
+        # Convertir les points du polygone en format numpy
+        polygon_points = np.array([[p.x, p.y] for p in polygon.points], dtype=np.int32)
+        
+        # Créer un masque pour le polygone
+        mask = np.zeros(self.original_image.shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask, [polygon_points], 255)
+        
+        # Créer un masque pour la détection
+        detection_mask = np.zeros(self.original_image.shape[:2], dtype=np.uint8)
+        detection_points = np.array(detection.points, dtype=np.int32)
+        cv2.fillPoly(detection_mask, [detection_points], 255)
+        
+        # Calculer l'intersection
+        intersection = cv2.bitwise_and(mask, detection_mask)
+        
+        # Si l'intersection n'est pas vide, les polygones se chevauchent
+        return np.any(intersection)
     
     def load_images(self):
         """Charge les images du dossier data/to_annotate."""
@@ -479,14 +534,22 @@ class MainWindow(QMainWindow):
             # Exécuter la détection si l'assistance IA est activée
             if self.ai_assist_button.isChecked():
                 print("Détection IA en cours...")
-                detections, labels = self.image_processor.run_detection(
-                    self.current_image_path
-                )
-                if detections is not None:
-                    print(f"Détection réussie : {len(labels)} objets trouvés")
-                    self.original_image = self.image_processor.draw_annotations(
-                        self.original_image, detections, labels
-                    )
+                detections, labels = self.image_processor.run_detection(self.current_image_path)
+                if detections is not None and labels is not None:
+                    print(f"Détection réussie : {len(detections.xyxy)} objets trouvés")
+                    # Créer des polygones à partir des détections
+                    for i, (box, confidence) in enumerate(zip(detections.xyxy, detections.confidence)):
+                        # Par défaut, toutes les détections sont des prises
+                        polygon = Polygon(f"ia_hold_{i+1}", "hold")
+                        # Convertir la boîte englobante en points de polygone
+                        x1, y1, x2, y2 = box
+                        # Créer un rectangle avec les 4 coins
+                        polygon.add_point(x1, y1)  # Haut gauche
+                        polygon.add_point(x2, y1)  # Haut droite
+                        polygon.add_point(x2, y2)  # Bas droite
+                        polygon.add_point(x1, y2)  # Bas gauche
+                        self.current_annotations.append(polygon)
+                        print(f"Polygone IA créé : {polygon.name} (hold) avec {len(polygon.points)} points")
                 else:
                     print("Aucune détection trouvée")
             
@@ -538,19 +601,82 @@ class MainWindow(QMainWindow):
     
     def toggle_ai_assist(self):
         """Active ou désactive l'assistance IA."""
+        print("\n=== Début de toggle_ai_assist ===")
         if self.ai_assist_button.isChecked():
             try:
+                print("Activation de l'assistance IA...")
                 self.image_processor.enable_ai_assist()
-                self.show_current_image()  # Rafraîchir l'affichage
+                print("ImageProcessor.enable_ai_assist() appelé avec succès")
+                
+                print(f"Exécution de la détection sur l'image : {self.current_image_path}")
+                detections, labels = self.image_processor.run_detection(self.current_image_path)
+                print(f"Type de retour de run_detection : {type(detections)}")
+                
+                if detections is not None and labels is not None:
+                    print(f"Détection réussie : {len(detections.xyxy)} objets trouvés")
+                    print(f"Contenu des détections : {detections}")
+                    
+                    # Supprimer les polygones existants créés par l'IA
+                    print("Suppression des polygones IA existants...")
+                    self.current_annotations = [
+                        polygon for polygon in self.current_annotations
+                        if not polygon.name.startswith("ia_")
+                    ]
+                    print(f"Nombre de polygones après suppression : {len(self.current_annotations)}")
+                    
+                    # Créer des polygones à partir des détections
+                    print("Création des nouveaux polygones IA...")
+                    for i, (box, confidence) in enumerate(zip(detections.xyxy, detections.confidence)):
+                        print(f"\nTraitement de la détection {i+1}/{len(detections.xyxy)}")
+                        print(f"Boîte englobante : {box}")
+                        print(f"Confiance : {confidence}")
+                        
+                        # Par défaut, toutes les détections sont des prises
+                        polygon = Polygon(f"ia_hold_{i+1}", "hold")
+                        print(f"Polygone créé : {polygon.name}")
+                        
+                        # Convertir la boîte englobante en points de polygone
+                        x1, y1, x2, y2 = box
+                        # Créer un rectangle avec les 4 coins
+                        polygon.add_point(x1, y1)  # Haut gauche
+                        polygon.add_point(x2, y1)  # Haut droite
+                        polygon.add_point(x2, y2)  # Bas droite
+                        polygon.add_point(x1, y2)  # Bas gauche
+                        
+                        self.current_annotations.append(polygon)
+                        print(f"Polygone IA ajouté aux annotations : {polygon.name} avec {len(polygon.points)} points")
+                    
+                    print(f"\nNombre total de polygones après ajout : {len(self.current_annotations)}")
+                    self.update_image_display()
+                    print("Affichage mis à jour")
+                    
+                    QMessageBox.information(
+                        self, "Détection terminée",
+                        f"{len(detections.xyxy)} objets détectés"
+                    )
+                else:
+                    print("Aucune détection trouvée")
             except Exception as e:
+                print(f"ERREUR lors de l'activation de l'assistance IA : {str(e)}")
+                print(f"Type de l'erreur : {type(e)}")
+                import traceback
+                print(f"Traceback complet :\n{traceback.format_exc()}")
                 QMessageBox.critical(
                     self, "Erreur",
                     f"Erreur lors de l'activation de l'assistance IA : {str(e)}"
                 )
                 self.ai_assist_button.setChecked(False)
         else:
+            print("Désactivation de l'assistance IA...")
             self.image_processor.disable_ai_assist()
-            self.show_current_image()  # Rafraîchir l'affichage
+            # Supprimer les polygones créés par l'IA
+            self.current_annotations = [
+                polygon for polygon in self.current_annotations
+                if not polygon.name.startswith("ia_")
+            ]
+            print(f"Nombre de polygones après désactivation : {len(self.current_annotations)}")
+            self.update_image_display()
+        print("=== Fin de toggle_ai_assist ===\n")
     
     def select_polygon(self, polygon):
         """Sélectionne un polygone."""
@@ -659,4 +785,12 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Erreur",
                 f"Erreur lors du déplacement de l'image : {str(e)}"
-            ) 
+            )
+    
+    def update_selected_polygon_type(self, new_type):
+        """Met à jour le type du polygone sélectionné."""
+        if self.selected_polygon:
+            old_type = self.selected_polygon.class_type
+            self.selected_polygon.class_type = new_type
+            print(f"Type du polygone {self.selected_polygon.name} changé de {old_type} à {new_type}")
+            self.update_image_display() 
