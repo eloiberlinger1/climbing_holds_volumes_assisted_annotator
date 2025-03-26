@@ -42,7 +42,14 @@ class MainWindow(QMainWindow):
         self.prev_button = QPushButton("Précédente (p)")
         self.next_button = QPushButton("Suivante (n)")
         self.save_button = QPushButton("Sauvegarder (s)")
-        self.finish_button = QPushButton("Terminer l'annotation")
+        self.finish_button = QPushButton("Terminer")
+        
+        # Définir une largeur minimale pour les boutons
+        button_width = 120
+        self.prev_button.setMinimumWidth(button_width)
+        self.next_button.setMinimumWidth(button_width)
+        self.save_button.setMinimumWidth(button_width)
+        self.finish_button.setMinimumWidth(button_width)
         
         # Ajout des boutons au layout de navigation
         navigation_layout.addWidget(self.prev_button)
@@ -391,9 +398,17 @@ class MainWindow(QMainWindow):
         # Trouver les limites du polygone
         x, y, w, h = cv2.boundingRect(points)
         
+        # Vérifier que les dimensions sont valides
+        if w <= 0 or h <= 0:
+            return None
+            
         # Recadrer l'image sur le polygone
         preview = preview[y:y+h, x:x+w]
         
+        # Vérifier que l'image n'est pas vide
+        if preview.size == 0:
+            return None
+            
         # Convertir en QImage
         height, width, channel = preview.shape
         bytes_per_line = 3 * width
@@ -448,6 +463,15 @@ class MainWindow(QMainWindow):
                 
             print(f"Image chargée avec succès : {self.original_image.shape}")
             
+            # Charger les annotations existantes
+            self.current_annotations = []
+            annotations = self.annotation_manager.load_annotations(self.current_image_path)
+            for class_type, points in annotations:
+                polygon = Polygon(f"{class_type}_{len(self.current_annotations) + 1}", class_type)
+                for x, y in points:
+                    polygon.add_point(x, y)
+                self.current_annotations.append(polygon)
+            
             # Exécuter la détection si l'assistance IA est activée
             if self.ai_assist_button.isChecked():
                 print("Détection IA en cours...")
@@ -472,7 +496,11 @@ class MainWindow(QMainWindow):
         if self.current_image_index < len(self.image_files) - 1:
             # Sauvegarder les annotations actuelles si nécessaire
             if self.current_annotations:
-                self.save_annotations()
+                self.annotation_manager.save_annotations(
+                    self.current_image_path,
+                    self.current_annotations,
+                    self.labels
+                )
             self.current_image_index += 1
             self.current_annotations = []  # Réinitialiser les annotations
             self.current_polygon = None
