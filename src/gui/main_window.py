@@ -107,8 +107,11 @@ class MainWindow(QMainWindow):
         self.new_polygon_button = QPushButton("Nouveau polygone (:)")
         self.delete_polygon_button = QPushButton("Supprimer (d)")
         self.delete_polygon_button.setEnabled(False)
+        self.duplicate_polygon_button = QPushButton("Dupliquer")
+        self.duplicate_polygon_button.setEnabled(False)
         annotation_layout.addWidget(self.new_polygon_button)
         annotation_layout.addWidget(self.delete_polygon_button)
+        annotation_layout.addWidget(self.duplicate_polygon_button)
         
         # Ajouter un label pour la touche =
         help_label = QLabel("Appuyez sur = pour ajouter des points au milieu de chaque ligne du polygone sélectionné")
@@ -174,6 +177,7 @@ class MainWindow(QMainWindow):
         self.confidence_slider.valueChanged.connect(self.update_confidence_threshold)
         self.new_polygon_button.clicked.connect(self.start_new_polygon)
         self.delete_polygon_button.clicked.connect(self.enable_polygon_deletion)
+        self.duplicate_polygon_button.clicked.connect(self.duplicate_selected_polygon)
         
         # Ajouter la connexion pour le changement de type d'annotation
         self.polygon_class.currentTextChanged.connect(self.update_selected_polygon_type)
@@ -327,6 +331,7 @@ class MainWindow(QMainWindow):
         self.selected_polygon = None
         self.selected_point = None
         self.delete_polygon_button.setEnabled(False)
+        self.duplicate_polygon_button.setEnabled(False)
         self.update_image_display()
     
     def update_image_display(self):
@@ -635,13 +640,20 @@ class MainWindow(QMainWindow):
                         polygon = Polygon(f"ia_hold_{i+1}", "hold")
                         print(f"Polygone créé : {polygon.name}")
                         
-                        # Convertir la boîte englobante en points de polygone
-                        x1, y1, x2, y2 = box
-                        # Créer un rectangle avec les 4 coins
-                        polygon.add_point(x1, y1)  # Haut gauche
-                        polygon.add_point(x2, y1)  # Haut droite
-                        polygon.add_point(x2, y2)  # Bas droite
-                        polygon.add_point(x1, y2)  # Bas gauche
+                        # Extraire les points de segmentation si disponibles
+                        if 'segmentations' in detections.data and detections.data['segmentations'][i] is not None:
+                            points = detections.data['segmentations'][i]
+                            for point in points:
+                                polygon.add_point(point['x'], point['y'])
+                            print(f"Utilisation des points de segmentation : {len(points)} points")
+                        else:
+                            # Si pas de segmentation, utiliser la boîte englobante
+                            x1, y1, x2, y2 = box
+                            polygon.add_point(x1, y1)  # Haut gauche
+                            polygon.add_point(x2, y1)  # Haut droite
+                            polygon.add_point(x2, y2)  # Bas droite
+                            polygon.add_point(x1, y2)  # Bas gauche
+                            print("Utilisation de la boîte englobante : 4 points")
                         
                         self.current_annotations.append(polygon)
                         print(f"Polygone IA ajouté aux annotations : {polygon.name} avec {len(polygon.points)} points")
@@ -694,6 +706,7 @@ class MainWindow(QMainWindow):
         self.selected_polygon = polygon
         self.current_polygon = polygon
         self.delete_polygon_button.setEnabled(True)
+        self.duplicate_polygon_button.setEnabled(True)
         
         print(f"Polygone sélectionné : {polygon.name}")
         print(f"Nombre de points : {len(polygon.points)}")
@@ -793,4 +806,29 @@ class MainWindow(QMainWindow):
             old_type = self.selected_polygon.class_type
             self.selected_polygon.class_type = new_type
             print(f"Type du polygone {self.selected_polygon.name} changé de {old_type} à {new_type}")
-            self.update_image_display() 
+            self.update_image_display()
+    
+    def duplicate_selected_polygon(self):
+        """Duplique le polygone sélectionné."""
+        if self.selected_polygon is None:
+            return
+            
+        # Créer un nouveau polygone avec le même type
+        original = self.selected_polygon
+        polygon_count = sum(1 for p in self.current_annotations if p.class_type == original.class_type)
+        new_name = f"{original.class_type}_{polygon_count + 1}"
+        
+        # Créer le nouveau polygone
+        new_polygon = Polygon(new_name, original.class_type)
+        
+        # Copier tous les points
+        for point in original.points:
+            new_polygon.add_point(point.x, point.y)
+            
+        # Ajouter le nouveau polygone aux annotations
+        self.current_annotations.append(new_polygon)
+        print(f"Polygone dupliqué : {new_name} avec {len(new_polygon.points)} points")
+        
+        # Sélectionner le nouveau polygone
+        self.select_polygon(new_polygon)
+        self.update_image_display() 

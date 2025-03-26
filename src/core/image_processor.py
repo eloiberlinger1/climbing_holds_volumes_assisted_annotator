@@ -31,12 +31,30 @@ class ImageProcessor:
         if not self.ai_assist_enabled:
             try:
                 print("Initialisation du modèle Roboflow...")
+                print(f"API Key : {ROBOFLOW_API_KEY[:5]}...")
+                print(f"Workspace : {ROBOFLOW_WORKSPACE}")
+                print(f"Project : {ROBOFLOW_PROJECT}")
+                print(f"Version : {ROBOFLOW_VERSION}")
+                
                 rf = Roboflow(api_key=ROBOFLOW_API_KEY)
-                self.model = rf.workspace(ROBOFLOW_WORKSPACE).project(ROBOFLOW_PROJECT).version(ROBOFLOW_VERSION).model
+                print("Roboflow initialisé")
+                
+                workspace = rf.workspace(ROBOFLOW_WORKSPACE)
+                print("Workspace chargé")
+                
+                project = workspace.project(ROBOFLOW_PROJECT)
+                print("Projet chargé")
+                
+                self.model = project.version(ROBOFLOW_VERSION).model
+                print("Modèle chargé")
+                
                 self.ai_assist_enabled = True
                 print("Modèle Roboflow initialisé avec succès")
             except Exception as e:
                 print(f"Erreur lors de l'initialisation du modèle : {str(e)}")
+                print(f"Type de l'erreur : {type(e)}")
+                import traceback
+                print(f"Traceback complet :\n{traceback.format_exc()}")
                 raise
     
     def disable_ai_assist(self):
@@ -68,7 +86,32 @@ class ImageProcessor:
         
         try:
             print("Exécution de la prédiction via l'API Roboflow...")
-            results = self.model.predict(image_path, confidence=40, overlap=30).json()
+            try:
+                # Essayer d'abord avec le format mask
+                print("Tentative avec le format mask...")
+                result = self.model.predict(image_path, confidence=40, overlap=30, format="json")
+                print(f"Résultat brut : {result}")
+                if result is not None:
+                    if isinstance(result, dict):
+                        results = result
+                    else:
+                        results = result.json()
+                else:
+                    raise Exception("La prédiction a retourné None")
+                
+            except Exception as e:
+                print(f"Erreur avec le format mask : {str(e)}")
+                print("Tentative avec le format par défaut...")
+                result = self.model.predict(image_path, confidence=40, overlap=30)
+                print(f"Résultat brut : {result}")
+                if result is not None:
+                    if isinstance(result, dict):
+                        results = result
+                    else:
+                        results = result.json()
+                else:
+                    raise Exception("La prédiction a retourné None")
+                
             print(f"Résultats de la prédiction : {results}")
             
             # Convertir les résultats en format supervision
@@ -76,17 +119,23 @@ class ImageProcessor:
             confidences = []
             class_ids = []
             labels = []
+            segmentations = []
             
             for prediction in results['predictions']:
                 confidence = prediction['confidence']
                 if confidence >= self.confidence_threshold:
-                    # Extraire les coordonnées du centre et les dimensions
+                    # Extraire les points de segmentation
+                    if 'segmentation' in prediction:
+                        points = prediction['segmentation']
+                        segmentations.append(points)
+                    else:
+                        segmentations.append(None)
+                    
+                    # Calculer la boîte englobante
                     x = prediction['x']
                     y = prediction['y']
                     width = prediction['width']
                     height = prediction['height']
-                    
-                    # Convertir en coordonnées de boîte englobante
                     x1 = x - width/2
                     y1 = y - height/2
                     x2 = x + width/2
@@ -100,11 +149,12 @@ class ImageProcessor:
             if not boxes:
                 return None, None
                 
-            # Créer l'objet Detections
+            # Créer l'objet Detections avec les segmentations
             detections = sv.Detections(
                 xyxy=np.array(boxes),
                 confidence=np.array(confidences),
-                class_id=np.array(class_ids)
+                class_id=np.array(class_ids),
+                data={'segmentations': segmentations}
             )
             
             print(f"Nombre de détections trouvées : {len(detections.xyxy)}")
@@ -112,6 +162,9 @@ class ImageProcessor:
             
         except Exception as e:
             print(f"Erreur lors de la détection : {str(e)}")
+            print(f"Type de l'erreur : {type(e)}")
+            import traceback
+            print(f"Traceback complet :\n{traceback.format_exc()}")
             return None, None
     
     def draw_annotations(self, image: np.ndarray, detections: sv.Detections, labels: list) -> np.ndarray:
